@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request, abort
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_cors import CORS
 import re
 
 load_dotenv()
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 limiter = Limiter(
     app=app,

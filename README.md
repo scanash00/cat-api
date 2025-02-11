@@ -80,6 +80,15 @@ Fetches a random cat image from Reddit.
 ### GET /
 Health check endpoint. Returns application status.
 
+## CORS Support
+The API supports Cross-Origin Resource Sharing (CORS) for all routes. By default, requests from any origin are allowed. 
+
+### CORS Configuration
+- All routes support cross-origin requests
+- Wildcard `*` is used to allow requests from any domain
+- Preflight requests are automatically handled
+
+**Note for Production**: Consider restricting CORS origins in a production environment for enhanced security.
 
 ## Contributing
 Contributions are welcome! Make sure to follow common sense when contributing, and keeping the code clean.
