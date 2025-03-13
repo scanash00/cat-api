@@ -167,11 +167,9 @@ def cache_response(ttl_seconds=CACHE_TTL):
             if not redis_client:
                 return f(*args, **kwargs)
             
-            # Check if no_cache parameter is present in the request
             if 'no_cache' in request.args:
                 return f(*args, **kwargs)
             
-            # Check if the request is from an allowed origin
             origin = request.headers.get('Origin')
             if origin and allowed_origins and origin in origins:
                 logger.info(f"Bypassing cache for allowed origin: {origin}")
