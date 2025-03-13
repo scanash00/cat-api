@@ -127,6 +127,7 @@ PREFETCH_INTERVAL = int(os.getenv('PREFETCH_INTERVAL', '900'))
 class CatRequestSchema(Schema):
     subreddit = fields.String(required=False)
     limit = fields.Integer(required=False, validate=lambda n: 1 <= n <= 50)
+    no_cache = fields.Boolean(required=False)
 
 def compress_response(response):
 
@@ -164,6 +165,16 @@ def cache_response(ttl_seconds=CACHE_TTL):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if not redis_client:
+                return f(*args, **kwargs)
+            
+            # Check if no_cache parameter is present in the request
+            if 'no_cache' in request.args:
+                return f(*args, **kwargs)
+            
+            # Check if the request is from an allowed origin
+            origin = request.headers.get('Origin')
+            if origin and allowed_origins and origin in origins:
+                logger.info(f"Bypassing cache for allowed origin: {origin}")
                 return f(*args, **kwargs)
             
             cache_key = f"cat_api:{request.path}:{hash(frozenset(request.args.items()))}"
@@ -447,12 +458,17 @@ def get_random_cat():
         
         subreddit_to_use = requested_subreddit if requested_subreddit else random.choice(cat_subreddits)
         
+        # Check if this is a request from an allowed origin
+        origin = request.headers.get('Origin')
+        is_allowed_origin = origin and allowed_origins and origin in origins
+        
         image_posts = []
         with prefetch_lock:
             if subreddit_to_use in prefetched_images and prefetched_images[subreddit_to_use]:
                 image_posts = prefetched_images[subreddit_to_use]
                 
-                if image_posts and requested_subreddit:
+                # Always return a random post for allowed origins or when requested_subreddit is specified
+                if image_posts and (requested_subreddit or is_allowed_origin):
                     random_post = random.choice(image_posts)
                     prefetched_images[subreddit_to_use].remove(random_post)
                     return format_cat_response(random_post, start_time)
@@ -481,6 +497,13 @@ def get_random_cat():
             }), 404
         
         random_post = random.choice(image_posts)
+        
+        # Remove the post from prefetched images if it's from an allowed origin
+        # to ensure they always get different images
+        if is_allowed_origin and subreddit_to_use in prefetched_images and random_post in prefetched_images[subreddit_to_use]:
+            with prefetch_lock:
+                if random_post in prefetched_images[subreddit_to_use]:
+                    prefetched_images[subreddit_to_use].remove(random_post)
         
         return format_cat_response(random_post, start_time)
     
