@@ -21,7 +21,6 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
 from marshmallow import Schema, fields, ValidationError
-from prometheus_flask_exporter import PrometheusMetrics
 from dotenv import load_dotenv
 import praw
 from requests.adapters import HTTPAdapter
@@ -59,9 +58,6 @@ if allowed_origins:
     CORS(app, resources={r"/*": {"origins": origins}})
 else:
     CORS(app)
-
-metrics = PrometheusMetrics(app)
-metrics.info('app_info', 'Cat API', version='1.0.0')
 
 limiter = Limiter(
     get_remote_address,
@@ -372,7 +368,6 @@ def apply_compression(response):
     return compress_response(response)
 
 @app.route('/')
-@metrics.do_not_track()
 @log_request()
 def health_check():
     try:
@@ -435,35 +430,7 @@ def health_check():
             "timestamp": datetime.datetime.now().isoformat()
         }), 500
 
-@app.route('/metrics')
-@metrics.do_not_track()
-def metrics_endpoint():
-    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-    if ',' in client_ip:  
-        client_ip = client_ip.split(',')[0].strip()
-    
-    is_localhost = client_ip in ['127.0.0.1', 'localhost', '::1']
-    is_private_ip = (
-        client_ip.startswith(('10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', 
-                             '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.',
-                             '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.'))
-    )
-    
-    auth_token = request.headers.get('X-Metrics-Auth')
-    expected_token = os.getenv('METRICS_AUTH_TOKEN')
-    is_authenticated = auth_token and expected_token and auth_token == expected_token
-    
-    if not is_authenticated and not (is_localhost and os.getenv('FLASK_ENV') == 'development'):
-        logger.warning(f"Unauthorized metrics access attempt from {client_ip}")
-        return jsonify({
-            "error": "Unauthorized access to metrics",
-            "status": 403
-        }), 403
-    
-    return metrics.generate_latest()
-
 @app.route('/stats')
-@metrics.do_not_track()
 @log_request()
 @cache_response(ttl_seconds=60)
 def api_stats():
@@ -510,7 +477,6 @@ def api_stats():
         }), 500
 
 @app.route('/random-cat')
-@metrics.do_not_track()
 @log_request()
 @validate_request(CatRequestSchema)
 @cache_response()
