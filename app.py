@@ -435,104 +435,18 @@ def health_check():
             "timestamp": datetime.datetime.now().isoformat()
         }), 500
 
-@app.route('/random-cat')
-@metrics.do_not_track()
-@log_request()
-@validate_request(CatRequestSchema)
-@cache_response()
-def get_random_cat():
-    try:
-        start_time = getattr(g, 'start_time', time.time())
-        
-        validated_data = getattr(g, 'validated_data', {})
-        
-        requested_subreddit = validated_data.get('subreddit')
-        
-        if requested_subreddit and requested_subreddit not in cat_subreddits:
-            return jsonify({
-                "error": f"Invalid subreddit. Must be one of: {', '.join(cat_subreddits)}",
-                "status": 400
-            }), 400
-        
-        subreddit_to_use = requested_subreddit if requested_subreddit else random.choice(cat_subreddits)
-        
-        # Check if this is a request from an allowed origin
-        origin = request.headers.get('Origin')
-        is_allowed_origin = origin and allowed_origins and origin in origins
-        
-        image_posts = []
-        with prefetch_lock:
-            if subreddit_to_use in prefetched_images and prefetched_images[subreddit_to_use]:
-                image_posts = prefetched_images[subreddit_to_use]
-                
-                # Always return a random post for allowed origins or when requested_subreddit is specified
-                if image_posts and (requested_subreddit or is_allowed_origin):
-                    random_post = random.choice(image_posts)
-                    prefetched_images[subreddit_to_use].remove(random_post)
-                    return format_cat_response(random_post, start_time)
-        
-        if not image_posts:
-            logger.info(f"No prefetched images for {subreddit_to_use}, fetching directly")
-            image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use)
-        
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            if not image_posts:
-                logger.warning(f"No images found in r/{subreddit_to_use}, trying another subreddit (attempt {attempt+1}/{max_attempts})")
-                
-                if not requested_subreddit:
-                    subreddit_to_use = random.choice([s for s in cat_subreddits if s != subreddit_to_use])
-                    image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use)
-                else:
-                    break
-            else:
-                break
-        
-        if not image_posts:
-            return jsonify({
-                "error": "No safe cat images found after multiple attempts",
-                "status": 404
-            }), 404
-        
-        random_post = random.choice(image_posts)
-        
-        # Remove the post from prefetched images if it's from an allowed origin
-        # to ensure they always get different images
-        if is_allowed_origin and subreddit_to_use in prefetched_images and random_post in prefetched_images[subreddit_to_use]:
-            with prefetch_lock:
-                if random_post in prefetched_images[subreddit_to_use]:
-                    prefetched_images[subreddit_to_use].remove(random_post)
-        
-        return format_cat_response(random_post, start_time)
-    
-    except Exception as e:
-        logger.error(f"Error in get_random_cat: {e}")
-        traceback.print_exc()
-        return jsonify({
-            "error": "Internal server error",
-            "details": str(e),
-            "status": 500
-        }), 500
-
-def format_cat_response(post, start_time):
-    response_time = int((time.time() - start_time) * 1000)
-    
-    response = {
-        "title": post.title,
-        "url": post.url,
-        "subreddit": post.subreddit.display_name,
-        "upvotes": post.score,
-        "source": "reddit",
-        "response_time_ms": response_time
-    }
-    
-    return jsonify(response)
-
 @app.route('/metrics')
 @metrics.do_not_track()
 def metrics_endpoint():
-    if request.remote_addr not in ['127.0.0.1', 'localhost'] and not request.remote_addr.startswith(('10.', '172.16.', '192.168.')):
-        return jsonify({"error": "Access denied"}), 403
+   if request.remote_addr != '127.0.0.1' and request.remote_addr != 'localhost':
+        auth_token = request.headers.get('X-Metrics-Auth')
+        expected_token = os.getenv('METRICS_AUTH_TOKEN')
+        
+        if not auth_token or not expected_token or auth_token != expected_token:
+            return jsonify({
+                "error": "Unauthorized access to metrics",
+                "status": 403
+            }), 403
     
     return metrics.generate_latest()
 
@@ -583,6 +497,95 @@ def api_stats():
             "error": "Error generating stats",
             "details": str(e)
         }), 500
+
+@app.route('/random-cat')
+@metrics.do_not_track()
+@log_request()
+@validate_request(CatRequestSchema)
+@cache_response()
+def get_random_cat():
+    try:
+        start_time = getattr(g, 'start_time', time.time())
+        
+        validated_data = getattr(g, 'validated_data', {})
+        
+        requested_subreddit = validated_data.get('subreddit')
+        
+        if requested_subreddit and requested_subreddit not in cat_subreddits:
+            return jsonify({
+                "error": f"Invalid subreddit. Must be one of: {', '.join(cat_subreddits)}",
+                "status": 400
+            }), 400
+        
+        subreddit_to_use = requested_subreddit if requested_subreddit else random.choice(cat_subreddits)
+        
+        origin = request.headers.get('Origin')
+        is_allowed_origin = origin and allowed_origins and origin in origins
+        
+        image_posts = []
+        with prefetch_lock:
+            if subreddit_to_use in prefetched_images and prefetched_images[subreddit_to_use]:
+                image_posts = prefetched_images[subreddit_to_use]
+                
+                if image_posts and (requested_subreddit or is_allowed_origin):
+                    random_post = random.choice(image_posts)
+                    prefetched_images[subreddit_to_use].remove(random_post)
+                    return format_cat_response(random_post, start_time)
+        
+        if not image_posts:
+            logger.info(f"No prefetched images for {subreddit_to_use}, fetching directly")
+            image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use)
+        
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if not image_posts:
+                logger.warning(f"No images found in r/{subreddit_to_use}, trying another subreddit (attempt {attempt+1}/{max_attempts})")
+                
+                if not requested_subreddit:
+                    subreddit_to_use = random.choice([s for s in cat_subreddits if s != subreddit_to_use])
+                    image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use)
+                else:
+                    break
+            else:
+                break
+        
+        if not image_posts:
+            return jsonify({
+                "error": "No safe cat images found after multiple attempts",
+                "status": 404
+            }), 404
+        
+        random_post = random.choice(image_posts)
+        
+        if is_allowed_origin and subreddit_to_use in prefetched_images and random_post in prefetched_images[subreddit_to_use]:
+            with prefetch_lock:
+                if random_post in prefetched_images[subreddit_to_use]:
+                    prefetched_images[subreddit_to_use].remove(random_post)
+        
+        return format_cat_response(random_post, start_time)
+    
+    except Exception as e:
+        logger.error(f"Error in get_random_cat: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e),
+            "status": 500
+        }), 500
+
+def format_cat_response(post, start_time):
+    response_time = int((time.time() - start_time) * 1000)
+    
+    response = {
+        "title": post.title,
+        "url": post.url,
+        "subreddit": post.subreddit.display_name,
+        "upvotes": post.score,
+        "source": "reddit",
+        "response_time_ms": response_time
+    }
+    
+    return jsonify(response)
 
 @app.errorhandler(400)
 def bad_request(e):
