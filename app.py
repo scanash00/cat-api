@@ -438,15 +438,27 @@ def health_check():
 @app.route('/metrics')
 @metrics.do_not_track()
 def metrics_endpoint():
-    if request.remote_addr != '127.0.0.1' and request.remote_addr != 'localhost':
-        auth_token = request.headers.get('X-Metrics-Auth')
-        expected_token = os.getenv('METRICS_AUTH_TOKEN')
-        
-        if not auth_token or not expected_token or auth_token != expected_token:
-            return jsonify({
-                "error": "Unauthorized access to metrics",
-                "status": 403
-            }), 403
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if ',' in client_ip:  
+        client_ip = client_ip.split(',')[0].strip()
+    
+    is_localhost = client_ip in ['127.0.0.1', 'localhost', '::1']
+    is_private_ip = (
+        client_ip.startswith(('10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', 
+                             '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.',
+                             '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.'))
+    )
+    
+    auth_token = request.headers.get('X-Metrics-Auth')
+    expected_token = os.getenv('METRICS_AUTH_TOKEN')
+    is_authenticated = auth_token and expected_token and auth_token == expected_token
+    
+    if not is_authenticated and not (is_localhost and os.getenv('FLASK_ENV') == 'development'):
+        logger.warning(f"Unauthorized metrics access attempt from {client_ip}")
+        return jsonify({
+            "error": "Unauthorized access to metrics",
+            "status": 403
+        }), 403
     
     return metrics.generate_latest()
 
