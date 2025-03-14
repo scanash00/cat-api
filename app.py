@@ -438,7 +438,7 @@ def health_check():
 @app.route('/metrics')
 @metrics.do_not_track()
 def metrics_endpoint():
-   if request.remote_addr != '127.0.0.1' and request.remote_addr != 'localhost':
+    if request.remote_addr != '127.0.0.1' and request.remote_addr != 'localhost':
         auth_token = request.headers.get('X-Metrics-Auth')
         expected_token = os.getenv('METRICS_AUTH_TOKEN')
         
@@ -453,8 +453,7 @@ def metrics_endpoint():
 @app.route('/stats')
 @metrics.do_not_track()
 @log_request()
-@cache_response(ttl_seconds=60) 
-
+@cache_response(ttl_seconds=60)
 def api_stats():
     try:
         start_time = getattr(g, 'start_time', time.time())
