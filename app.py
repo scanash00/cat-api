@@ -107,9 +107,26 @@ adapter = HTTPAdapter(
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
-cat_subreddits = ['cats', 'Catloaf', 'CatsStandingUp', 'CatsInSinks', 'catpictures', 'kittens', 'IllegallySmolCats']
+cat_subreddits = [
+    'cats', 'Catloaf', 'CatsStandingUp', 'CatsInSinks', 'catpictures', 'kittens', 'IllegallySmolCats', 'cat', '316cats',
+    'SupermodelCats', 'BlackCats', 'Floof', 'CatsWithJobs', 'TuxedoCats', 'CatSpotting', 'CatGifs', 'CatBellies',
+    'TheCatTrapIsWorking', 'CatsInBusinessAttire', 'StartledCats', 'curledfeetsies', 'CatsAreAssholes',
+    'CatsAreAliens', 'CatLoaf', 'CatsInHats', 'CatsOnGlass', 'Eyebleach', 'CatsWithDogs', 'CatsInBoxes', 'blep',
+    'CatsPlayingDnd', 'CatSlaps', 'CatsWhoYell', 'CatsWithSocks', 'teefies', 'toebeans', 'airplaneears', 'bottlebrush',
+    'CatsInWaterPackages', 'CatsWhoSqueak', 'CatsWhoChirp', 'CatsWhoTrill', 'gingercats', 'torties', 'mainecoons',
+    'SiberianCats', 'ragdollcats', 'standardissuecat', 'WhiskerFireworks', 'scrungycats', 'CatsInSunlight', 'CatSmiles',
+    'CatsEnjoyingPets', 'CatsHuggingThings', 'CatsSittingLikePeople', 'CatsStaringAtWalls', 'CatsWithMustaches',
+    'PirateKitties', 'PetTheDamnCat', 'CatsWhoDidNotWantDads', 'CatsOnPizza', 'CatsWithHats',
+    'CatsInCostumes', 'CatsInSnow', 'CatsOnKeyboards', 'ChonkyCats', 'Kitten', 'KittenGifs', 'CatPics'
+]
+
+cat_subreddits = list(dict.fromkeys(cat_subreddits))
+
 prefetched_images = {}
 prefetch_lock = Lock()
+subreddit_access_count = {}  
+subreddit_error_count = {}  
+last_access_time = {}        
 thread_pool = concurrent.futures.ThreadPoolExecutor(
     max_workers=int(os.getenv('THREAD_POOL_SIZE', '10'))
 )
@@ -117,8 +134,11 @@ thread_pool = concurrent.futures.ThreadPoolExecutor(
 CACHE_TTL = int(os.getenv('CACHE_TTL', '3600')) 
 REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '5')) 
 COMPRESSION_THRESHOLD = int(os.getenv('COMPRESSION_THRESHOLD', '1024')) 
-PREFETCH_BATCH_SIZE = int(os.getenv('PREFETCH_BATCH_SIZE', '3')) 
-PREFETCH_INTERVAL = int(os.getenv('PREFETCH_INTERVAL', '900')) 
+PREFETCH_BATCH_SIZE = int(os.getenv('PREFETCH_BATCH_SIZE', '5'))  
+PREFETCH_INTERVAL = int(os.getenv('PREFETCH_INTERVAL', '600'))    
+MIN_IMAGES_PER_SUBREDDIT = int(os.getenv('MIN_IMAGES_PER_SUBREDDIT', '5'))
+MAX_PREFETCH_ERRORS = int(os.getenv('MAX_PREFETCH_ERRORS', '3'))
+PREFETCH_RETRY_DELAY = int(os.getenv('PREFETCH_RETRY_DELAY', '30'))
 
 class CatRequestSchema(Schema):
     subreddit = fields.String(required=False)
@@ -284,31 +304,89 @@ def fetch_safe_cat_images_from_subreddit(subreddit_name, limit=20):
         return []
 
 def prefetch_cat_images_batch():
-    global prefetched_images
+    global prefetched_images, subreddit_access_count, subreddit_error_count
     
     logger.info("Starting batch prefetch of cat images")
     start_time = time.time()
     
-    selected_subreddits = random.sample(cat_subreddits, min(PREFETCH_BATCH_SIZE, len(cat_subreddits)))
-    
-    fetch_tasks = []
-    for subreddit in selected_subreddits:
-        fetch_tasks.append(thread_pool.submit(fetch_safe_cat_images_from_subreddit, subreddit))
-    
-    new_images = {}
-    for subreddit, task in zip(selected_subreddits, fetch_tasks):
-        try:
-            images = task.result(timeout=REQUEST_TIMEOUT * 2)
-            if images:
-                new_images[subreddit] = images
-        except Exception as e:
-            logger.error(f"Error in prefetch task for {subreddit}: {e}")
+    candidate_subreddits = []
     
     with prefetch_lock:
-        prefetched_images.update(new_images)
+        for subreddit in cat_subreddits:
+            if subreddit not in prefetched_images or len(prefetched_images.get(subreddit, [])) < MIN_IMAGES_PER_SUBREDDIT:
+                candidate_subreddits.append(subreddit)
+    
+    popular_subreddits = sorted(
+        [s for s in subreddit_access_count.keys() if s not in candidate_subreddits],
+        key=lambda s: subreddit_access_count.get(s, 0),
+        reverse=True
+    )[:PREFETCH_BATCH_SIZE]
+    
+    candidate_subreddits.extend(popular_subreddits)
+    
+    remaining_subreddits = [s for s in cat_subreddits if s not in candidate_subreddits]
+    if remaining_subreddits:
+        candidate_subreddits.extend(random.sample(
+            remaining_subreddits, 
+            min(PREFETCH_BATCH_SIZE // 4, len(remaining_subreddits))
+        ))
+    
+    candidate_subreddits = [
+        s for s in candidate_subreddits 
+        if subreddit_error_count.get(s, 0) < MAX_PREFETCH_ERRORS
+    ]
+    
+    if len(candidate_subreddits) < PREFETCH_BATCH_SIZE // 2:
+        candidate_subreddits.extend(random.sample(
+            cat_subreddits,
+            min(PREFETCH_BATCH_SIZE - len(candidate_subreddits), len(cat_subreddits))
+        ))
+    
+    selected_subreddits = candidate_subreddits[:PREFETCH_BATCH_SIZE]
+    if len(selected_subreddits) < PREFETCH_BATCH_SIZE:
+        remaining = [s for s in cat_subreddits if s not in selected_subreddits]
+        if remaining:
+            selected_subreddits.extend(random.sample(
+                remaining,
+                min(PREFETCH_BATCH_SIZE - len(selected_subreddits), len(remaining))
+            ))
+    
+    logger.info(f"Selected {len(selected_subreddits)} subreddits for prefetching: {', '.join(selected_subreddits)}")
+    
+    fetch_tasks = {}
+    for subreddit in selected_subreddits:
+        fetch_tasks[subreddit] = thread_pool.submit(fetch_safe_cat_images_from_subreddit, subreddit)
+    
+    new_images = {}
+    for subreddit, task in fetch_tasks.items():
+        try:
+            images = task.result(timeout=REQUEST_TIMEOUT * 3) 
+            
+            if images:
+                new_images[subreddit] = images
+                subreddit_error_count[subreddit] = 0
+            else:
+                subreddit_error_count[subreddit] = subreddit_error_count.get(subreddit, 0) + 1
+                logger.warning(f"No images found for r/{subreddit}, error count: {subreddit_error_count[subreddit]}")
+        except Exception as e:
+            subreddit_error_count[subreddit] = subreddit_error_count.get(subreddit, 0) + 1
+            logger.error(f"Error in prefetch task for {subreddit} (error count: {subreddit_error_count[subreddit]}): {e}")
+    
+    with prefetch_lock:
+        for subreddit, images in new_images.items():
+            if subreddit not in prefetched_images:
+                prefetched_images[subreddit] = []
+            
+            existing_urls = {post.url for post in prefetched_images[subreddit]}
+            for post in images:
+                if post.url not in existing_urls:
+                    prefetched_images[subreddit].append(post)
     
     duration = time.time() - start_time
-    logger.info(f"Batch prefetch completed in {duration:.2f}s, fetched from {len(new_images)} subreddits")
+    total_images = sum(len(images) for images in prefetched_images.values())
+    
+    logger.info(f"Batch prefetch completed in {duration:.2f}s, fetched {sum(len(images) for images in new_images.values())} new images")
+    logger.info(f"Total prefetched images: {total_images} across {len(prefetched_images)} subreddits")
     
     return duration
 
@@ -316,17 +394,61 @@ def start_prefetching():
     def prefetch_worker():
         logger.info("Starting prefetch worker thread")
         
+        consecutive_errors = 0
+        last_prefetch_time = time.time()
+        
         while True:
             try:
-                duration = prefetch_cat_images_batch()
+                current_time = time.time()
+                time_since_last_prefetch = current_time - last_prefetch_time
                 
-                sleep_time = max(10, PREFETCH_INTERVAL - duration)
+                total_prefetched = 0
+                with prefetch_lock:
+                    total_prefetched = sum(len(images) for images in prefetched_images.values())
+                
+                need_prefetch = False
+                
+                if total_prefetched < MIN_IMAGES_PER_SUBREDDIT * PREFETCH_BATCH_SIZE:
+                    need_prefetch = True
+                    logger.info(f"Triggering prefetch due to low total image count ({total_prefetched})")
+                
+                elif time_since_last_prefetch >= PREFETCH_INTERVAL:
+                    need_prefetch = True
+                    logger.info(f"Triggering prefetch due to interval ({time_since_last_prefetch:.2f}s)")
+                
+                else:
+                    with prefetch_lock:
+                        popular_subs = sorted(
+                            subreddit_access_count.keys(), 
+                            key=lambda s: subreddit_access_count.get(s, 0),
+                            reverse=True
+                        )[:5]  
+                        
+                        for sub in popular_subs:
+                            if sub not in prefetched_images or len(prefetched_images.get(sub, [])) < MIN_IMAGES_PER_SUBREDDIT:
+                                need_prefetch = True
+                                logger.info(f"Triggering prefetch due to popular subreddit {sub} being low on images")
+                                break
+                
+                if need_prefetch:
+                    last_prefetch_time = current_time
+                    duration = prefetch_cat_images_batch()
+                    consecutive_errors = 0
+                    
+                    sleep_time = max(10, min(PREFETCH_INTERVAL // 2, duration * 2))
+                else:
+                    sleep_time = 30
+                
                 logger.info(f"Prefetch worker sleeping for {sleep_time:.2f}s")
                 time.sleep(sleep_time)
                 
             except Exception as e:
-                logger.error(f"Error in prefetch worker: {e}")
-                time.sleep(60)
+                consecutive_errors += 1
+                logger.error(f"Error in prefetch worker (consecutive errors: {consecutive_errors}): {e}")
+                
+                sleep_time = min(PREFETCH_INTERVAL, PREFETCH_RETRY_DELAY * (2 ** (consecutive_errors - 1)))
+                logger.info(f"Prefetch worker backing off for {sleep_time}s after error")
+                time.sleep(sleep_time)
     
     prefetch_thread = threading.Thread(target=prefetch_worker, daemon=True)
     prefetch_thread.start()
@@ -446,6 +568,22 @@ def api_stats():
         with prefetch_lock:
             prefetch_count = sum(len(posts) for posts in prefetched_images.values())
             prefetch_age = int(time.time() - getattr(app, 'last_prefetch_time', app.start_time))
+            
+            popular_subreddits = sorted(
+                subreddit_access_count.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:5]
+            
+            error_subreddits = {
+                sub: count for sub, count in subreddit_error_count.items() 
+                if count > 0
+            }
+            
+            prefetch_distribution = {
+                sub: len(posts) for sub, posts in prefetched_images.items()
+                if posts
+            }
         
         response_time = int((time.time() - start_time) * 1000)
         
@@ -461,7 +599,18 @@ def api_stats():
             "cache": {
                 "enabled": redis_client is not None,
                 "prefetched_images": prefetch_count,
-                "prefetch_age_seconds": prefetch_age
+                "prefetch_age_seconds": prefetch_age,
+                "prefetch_distribution": prefetch_distribution,
+                "prefetch_config": {
+                    "batch_size": PREFETCH_BATCH_SIZE,
+                    "interval": PREFETCH_INTERVAL,
+                    "min_images_per_subreddit": MIN_IMAGES_PER_SUBREDDIT
+                }
+            },
+            "subreddits": {
+                "total": len(cat_subreddits),
+                "popular": dict(popular_subreddits),
+                "errors": error_subreddits
             },
             "timestamp": datetime.datetime.now().isoformat(),
             "response_time_ms": response_time
@@ -496,6 +645,9 @@ def get_random_cat():
         
         subreddit_to_use = requested_subreddit if requested_subreddit else random.choice(cat_subreddits)
         
+        subreddit_access_count[subreddit_to_use] = subreddit_access_count.get(subreddit_to_use, 0) + 1
+        last_access_time[subreddit_to_use] = time.time()
+        
         origin = request.headers.get('Origin')
         is_allowed_origin = origin and allowed_origins and origin in origins
         
@@ -507,6 +659,10 @@ def get_random_cat():
                 if image_posts and (requested_subreddit or is_allowed_origin):
                     random_post = random.choice(image_posts)
                     prefetched_images[subreddit_to_use].remove(random_post)
+                    
+                    if len(prefetched_images[subreddit_to_use]) < MIN_IMAGES_PER_SUBREDDIT:
+                        logger.info(f"Running low on prefetched images for r/{subreddit_to_use}: {len(prefetched_images[subreddit_to_use])} remaining")
+                    
                     return format_cat_response(random_post, start_time)
         
         if not image_posts:
@@ -519,7 +675,19 @@ def get_random_cat():
                 logger.warning(f"No images found in r/{subreddit_to_use}, trying another subreddit (attempt {attempt+1}/{max_attempts})")
                 
                 if not requested_subreddit:
-                    subreddit_to_use = random.choice([s for s in cat_subreddits if s != subreddit_to_use])
+                    with prefetch_lock:
+                        available_subs = [s for s in prefetched_images.keys() 
+                                         if prefetched_images[s] and s != subreddit_to_use]
+                    
+                    if available_subs:
+                        subreddit_to_use = random.choice(available_subs)
+                        logger.info(f"Selected alternative subreddit with prefetched images: r/{subreddit_to_use}")
+                    else:
+                        subreddit_to_use = random.choice([s for s in cat_subreddits if s != subreddit_to_use])
+                    
+                    subreddit_access_count[subreddit_to_use] = subreddit_access_count.get(subreddit_to_use, 0) + 1
+                    last_access_time[subreddit_to_use] = time.time()
+                    
                     image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use)
                 else:
                     break
@@ -534,7 +702,17 @@ def get_random_cat():
         
         random_post = random.choice(image_posts)
         
-        if is_allowed_origin and subreddit_to_use in prefetched_images and random_post in prefetched_images[subreddit_to_use]:
+        if subreddit_to_use not in prefetched_images:
+            with prefetch_lock:
+                prefetched_images[subreddit_to_use] = []
+                
+                other_posts = [p for p in image_posts if p.id != random_post.id]
+                prefetched_images[subreddit_to_use].extend(other_posts[:MIN_IMAGES_PER_SUBREDDIT])
+                
+                if other_posts:
+                    logger.info(f"Added {len(other_posts[:MIN_IMAGES_PER_SUBREDDIT])} directly fetched images to prefetch cache for r/{subreddit_to_use}")
+        
+        elif is_allowed_origin and random_post in prefetched_images[subreddit_to_use]:
             with prefetch_lock:
                 if random_post in prefetched_images[subreddit_to_use]:
                     prefetched_images[subreddit_to_use].remove(random_post)
