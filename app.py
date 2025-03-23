@@ -50,7 +50,14 @@ csp = {
     'style-src': ["'self'", "'unsafe-inline'"],
     'script-src': ["'self'", "'unsafe-inline'"]
 }
-talisman = Talisman(app, content_security_policy=csp, force_https=False)
+talisman = Talisman(
+    app, 
+    content_security_policy=csp, 
+    force_https=False,
+    strict_transport_security=False,
+    session_cookie_secure=False,
+    referrer_policy='no-referrer'
+)
 
 allowed_origins = os.getenv('ALLOWED_ORIGINS')
 if allowed_origins:
@@ -62,8 +69,8 @@ else:
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["100 per day", "30 per hour", "10 per minute"],
-    storage_uri=os.getenv('REDIS_URL', 'memory://'),
+    default_limits=["1000 per day", "300 per hour", "100 per minute"],
+    storage_uri="memory://",
     strategy="fixed-window"
 )
 
@@ -107,20 +114,30 @@ adapter = HTTPAdapter(
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
-cat_subreddits = [
-    'cats', 'Catloaf', 'CatsStandingUp', 'CatsInSinks', 'catpictures', 'kittens', 'IllegallySmolCats', 'cat', '316cats',
-    'SupermodelCats', 'BlackCats', 'Floof', 'CatsWithJobs', 'TuxedoCats', 'CatSpotting', 'CatGifs', 'CatBellies',
-    'TheCatTrapIsWorking', 'CatsInBusinessAttire', 'StartledCats', 'curledfeetsies', 'CatsAreAssholes',
-    'CatsAreAliens', 'CatLoaf', 'CatsInHats', 'CatsOnGlass', 'Eyebleach', 'CatsWithDogs', 'CatsInBoxes', 'blep',
-    'CatsPlayingDnd', 'CatSlaps', 'CatsWhoYell', 'CatsWithSocks', 'teefies', 'toebeans', 'airplaneears', 'bottlebrush',
-    'CatsInWaterPackages', 'CatsWhoSqueak', 'CatsWhoChirp', 'CatsWhoTrill', 'gingercats', 'torties', 'mainecoons',
-    'SiberianCats', 'ragdollcats', 'standardissuecat', 'WhiskerFireworks', 'scrungycats', 'CatsInSunlight', 'CatSmiles',
-    'CatsEnjoyingPets', 'CatsHuggingThings', 'CatsSittingLikePeople', 'CatsStaringAtWalls', 'CatsWithMustaches',
-    'PirateKitties', 'PetTheDamnCat', 'CatsWhoDidNotWantDads', 'CatsOnPizza', 'CatsWithHats',
-    'CatsInCostumes', 'CatsInSnow', 'CatsOnKeyboards', 'ChonkyCats', 'Kitten', 'KittenGifs', 'CatPics'
-]
+CAT_SUBREDDITS = {
+    'cats': 1, 'catpictures': 1, 'kittens': 1, 'IllegallySmolCats': 1, 'cat': 1, 'SupermodelCats': 1, 
+    'BlackCats': 1, 'CatsWithJobs': 1, 'CatGifs': 1, 'StartledCats': 1, 'CatsInBoxes': 1, 'Eyebleach': 1,
+    
+    'Catloaf': 2, 'CatsStandingUp': 2, 'CatsInSinks': 2, 'TuxedoCats': 2, 'CatSpotting': 2, 'CatBellies': 2,
+    'TheCatTrapIsWorking': 2, 'curledfeetsies': 2, 'CatsAreAssholes': 2, 'CatsInHats': 2, 'CatsOnGlass': 2, 
+    'blep': 2, 'CatSlaps': 2, 'CatsWhoYell': 2, 'teefies': 2, 'toebeans': 2, 'gingercats': 2, 'mainecoons': 2,
+    'standardissuecat': 2, 'ChonkyCats': 2, 'Kitten': 2, 'KittenGifs': 2, 'CatPics': 2, 'PetTheDamnCat': 2,
+    
+    '316cats': 3, 'Floof': 3, 'CatsInBusinessAttire': 3, 'CatsAreAliens': 3, 'CatLoaf': 3, 'CatsWithcats': 3,
+    'CatsPlayingDnd': 3, 'CatsWithSocks': 3, 'airplaneears': 3, 'bottlebrush': 3, 'CatsInWaterPackages': 3, 
+    'CatsWhoSqueak': 3, 'CatsWhoChirp': 3, 'CatsWhoTrill': 3, 'torties': 3, 'SiberianCats': 3, 'ragdollcats': 3, 
+    'WhiskerFireworks': 3, 'scrungycats': 3, 'CatsInSunlight': 3, 'CatSmiles': 3, 'CatsEnjoyingPets': 3, 
+    'CatsHuggingThings': 3, 'CatsSittingLikePeople': 3, 'CatsStaringAtWalls': 3, 'CatsWithMustaches': 3,
+    'PirateKitties': 3, 'CatsWhoDidNotWantDads': 3, 'CatsOnPizza': 3, 'CatsWithHats': 3,
+    'CatsInCostumes': 3, 'CatsInSnow': 3, 'CatsOnKeyboards': 3
+}
 
-cat_subreddits = list(dict.fromkeys(cat_subreddits))
+def clean_url(url):
+    if not url:
+        return url
+    cleaned_url = url.strip()
+    cleaned_url = cleaned_url.replace(' ', '%20')
+    return cleaned_url
 
 prefetched_images = {}
 prefetch_lock = Lock()
@@ -134,13 +151,13 @@ thread_pool = concurrent.futures.ThreadPoolExecutor(
 CACHE_TTL = int(os.getenv('CACHE_TTL', '3600')) 
 REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '5')) 
 COMPRESSION_THRESHOLD = int(os.getenv('COMPRESSION_THRESHOLD', '1024')) 
-PREFETCH_BATCH_SIZE = int(os.getenv('PREFETCH_BATCH_SIZE', '5'))  
-PREFETCH_INTERVAL = int(os.getenv('PREFETCH_INTERVAL', '600'))    
-MIN_IMAGES_PER_SUBREDDIT = int(os.getenv('MIN_IMAGES_PER_SUBREDDIT', '5'))
+PREFETCH_BATCH_SIZE = int(os.getenv('PREFETCH_BATCH_SIZE', '10'))  
+PREFETCH_INTERVAL = int(os.getenv('PREFETCH_INTERVAL', '300'))    
+MIN_IMAGES_PER_SUBREDDIT = int(os.getenv('MIN_IMAGES_PER_SUBREDDIT', '10'))
 MAX_PREFETCH_ERRORS = int(os.getenv('MAX_PREFETCH_ERRORS', '3'))
 PREFETCH_RETRY_DELAY = int(os.getenv('PREFETCH_RETRY_DELAY', '30'))
 
-class CatRequestSchema(Schema):
+class catRequestSchema(Schema):
     subreddit = fields.String(required=False)
     limit = fields.Integer(required=False, validate=lambda n: 1 <= n <= 50)
     no_cache = fields.Boolean(required=False)
@@ -176,54 +193,11 @@ def compress_response(response):
     return resp
 
 def cache_response(ttl_seconds=CACHE_TTL):
-
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            if not redis_client:
-                return f(*args, **kwargs)
-            
-            if 'no_cache' in request.args:
-                return f(*args, **kwargs)
-            
-            origin = request.headers.get('Origin')
-            if origin and allowed_origins and origin in origins:
-                logger.info(f"Bypassing cache for allowed origin: {origin}")
-                return f(*args, **kwargs)
-            
-            cache_key = f"cat_api:{request.path}:{hash(frozenset(request.args.items()))}"
-            
-            cached_response = redis_client.get(cache_key)
-            if cached_response:
-                try:
-                    cached_data = json.loads(cached_response)
-                    if isinstance(cached_data, dict):
-                        cached_data['from_cache'] = True
-                    
-                    start_time = getattr(g, 'start_time', time.time())
-                    response_time = int((time.time() - start_time) * 1000)
-                    
-                    if isinstance(cached_data, dict):
-                        cached_data['response_time_ms'] = response_time
-                    
-                    logger.info(f"Cache hit for {request.path}")
-                    return jsonify(cached_data)
-                except Exception as e:
-                    logger.error(f"Error parsing cached response: {e}")
-            
-            response = f(*args, **kwargs)
-            
-            try:
-                if response and hasattr(response, 'json'):
-                    response_data = response.json
-                    redis_client.setex(cache_key, ttl_seconds, json.dumps(response_data))
-            except Exception as e:
-                logger.error(f"Error caching response: {e}")
-            
-            return response
-        
+            return f(*args, **kwargs)
         return decorated_function
-    
     return decorator
 
 def log_request():
@@ -249,22 +223,21 @@ def validate_request(schema):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            schema_instance = schema()
-            
             try:
-                validated_data = schema_instance.load(request.args)
+                data = {}
+                for key, value in request.args.items():
+                    data[key] = value
                 
+                validated_data = schema().load(data)
                 g.validated_data = validated_data
                 
                 return f(*args, **kwargs)
-            
-            except ValidationError as err:
-                error_response = {
-                    "error": "Invalid request parameters",
-                    "details": err.messages,
+            except ValidationError as e:
+                return jsonify({
+                    "error": "Validation error",
+                    "details": str(e.messages),
                     "status": 400
-                }
-                return jsonify(error_response), 400
+                }), 400
         
         return decorated_function
     
@@ -294,6 +267,7 @@ def fetch_safe_cat_images_from_subreddit(subreddit_name, limit=20):
         for post in subreddit.hot(limit=limit):
             if post.url.endswith(('.jpg', '.jpeg', '.png', '.gif')):
                 if is_safe_content(post.title):
+                    post.url = clean_url(post.url)
                     image_posts.append(post)
         
         logger.info(f"Fetched {len(image_posts)} safe cat images from r/{subreddit_name}")
@@ -304,91 +278,383 @@ def fetch_safe_cat_images_from_subreddit(subreddit_name, limit=20):
         return []
 
 def prefetch_cat_images_batch():
-    global prefetched_images, subreddit_access_count, subreddit_error_count
-    
-    logger.info("Starting batch prefetch of cat images")
     start_time = time.time()
     
-    candidate_subreddits = []
-    
+    subreddits_to_prefetch = []
     with prefetch_lock:
-        for subreddit in cat_subreddits:
-            if subreddit not in prefetched_images or len(prefetched_images.get(subreddit, [])) < MIN_IMAGES_PER_SUBREDDIT:
-                candidate_subreddits.append(subreddit)
-    
-    popular_subreddits = sorted(
-        [s for s in subreddit_access_count.keys() if s not in candidate_subreddits],
-        key=lambda s: subreddit_access_count.get(s, 0),
-        reverse=True
-    )[:PREFETCH_BATCH_SIZE]
-    
-    candidate_subreddits.extend(popular_subreddits)
-    
-    remaining_subreddits = [s for s in cat_subreddits if s not in candidate_subreddits]
-    if remaining_subreddits:
-        candidate_subreddits.extend(random.sample(
-            remaining_subreddits, 
-            min(PREFETCH_BATCH_SIZE // 4, len(remaining_subreddits))
-        ))
-    
-    candidate_subreddits = [
-        s for s in candidate_subreddits 
-        if subreddit_error_count.get(s, 0) < MAX_PREFETCH_ERRORS
-    ]
-    
-    if len(candidate_subreddits) < PREFETCH_BATCH_SIZE // 2:
-        candidate_subreddits.extend(random.sample(
-            cat_subreddits,
-            min(PREFETCH_BATCH_SIZE - len(candidate_subreddits), len(cat_subreddits))
-        ))
-    
-    selected_subreddits = candidate_subreddits[:PREFETCH_BATCH_SIZE]
-    if len(selected_subreddits) < PREFETCH_BATCH_SIZE:
-        remaining = [s for s in cat_subreddits if s not in selected_subreddits]
-        if remaining:
-            selected_subreddits.extend(random.sample(
-                remaining,
-                min(PREFETCH_BATCH_SIZE - len(selected_subreddits), len(remaining))
-            ))
-    
-    logger.info(f"Selected {len(selected_subreddits)} subreddits for prefetching: {', '.join(selected_subreddits)}")
-    
-    fetch_tasks = {}
-    for subreddit in selected_subreddits:
-        fetch_tasks[subreddit] = thread_pool.submit(fetch_safe_cat_images_from_subreddit, subreddit)
-    
-    new_images = {}
-    for subreddit, task in fetch_tasks.items():
-        try:
-            images = task.result(timeout=REQUEST_TIMEOUT * 3) 
-            
-            if images:
-                new_images[subreddit] = images
-                subreddit_error_count[subreddit] = 0
-            else:
-                subreddit_error_count[subreddit] = subreddit_error_count.get(subreddit, 0) + 1
-                logger.warning(f"No images found for r/{subreddit}, error count: {subreddit_error_count[subreddit]}")
-        except Exception as e:
-            subreddit_error_count[subreddit] = subreddit_error_count.get(subreddit, 0) + 1
-            logger.error(f"Error in prefetch task for {subreddit} (error count: {subreddit_error_count[subreddit]}): {e}")
-    
-    with prefetch_lock:
-        for subreddit, images in new_images.items():
+        for subreddit in CAT_SUBREDDITS:
             if subreddit not in prefetched_images:
                 prefetched_images[subreddit] = []
-            
-            existing_urls = {post.url for post in prefetched_images[subreddit]}
-            for post in images:
-                if post.url not in existing_urls:
-                    prefetched_images[subreddit].append(post)
+                subreddits_to_prefetch.append(subreddit)
+            elif len(prefetched_images[subreddit]) < MIN_IMAGES_PER_SUBREDDIT:
+                subreddits_to_prefetch.append(subreddit)
+    
+    if not subreddits_to_prefetch and random.random() < 0.3:
+        subreddits_to_prefetch = random.sample(list(CAT_SUBREDDITS.keys()), 
+                                              min(PREFETCH_BATCH_SIZE, len(CAT_SUBREDDITS)))
+    
+    if len(subreddits_to_prefetch) > PREFETCH_BATCH_SIZE:
+        subreddits_to_prefetch = random.sample(subreddits_to_prefetch, PREFETCH_BATCH_SIZE)
+    
+    if not subreddits_to_prefetch:
+        logger.info("No subreddits need prefetching at this time")
+        return 0
+    
+    logger.info(f"Prefetching images from {len(subreddits_to_prefetch)} subreddits: {', '.join(subreddits_to_prefetch)}")
+    
+    with thread_pool as executor:
+        future_to_subreddit = {
+            executor.submit(fetch_safe_cat_images_from_subreddit, subreddit, 30): 
+            subreddit for subreddit in subreddits_to_prefetch
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_subreddit):
+            subreddit = future_to_subreddit[future]
+            try:
+                posts = future.result()
+                
+                with prefetch_lock:
+                    if subreddit not in prefetched_images:
+                        prefetched_images[subreddit] = []
+                    
+                    new_posts = [p for p in posts if p not in prefetched_images[subreddit]]
+                    
+                    max_cache_size = MIN_IMAGES_PER_SUBREDDIT * 2
+                    if len(prefetched_images[subreddit]) + len(new_posts) > max_cache_size:
+                        prefetched_images[subreddit] = prefetched_images[subreddit][-(max_cache_size-len(new_posts)):]
+                    
+                    prefetched_images[subreddit].extend(new_posts)
+                    
+                    logger.info(f"Added {len(new_posts)} new images to prefetch cache for r/{subreddit}")
+                    
+            except Exception as e:
+                logger.error(f"Error prefetching from r/{subreddit}: {e}")
     
     duration = time.time() - start_time
-    total_images = sum(len(images) for images in prefetched_images.values())
-    
-    logger.info(f"Batch prefetch completed in {duration:.2f}s, fetched {sum(len(images) for images in new_images.values())} new images")
-    logger.info(f"Total prefetched images: {total_images} across {len(prefetched_images)} subreddits")
-    
+    logger.info(f"Prefetch batch completed in {duration:.2f}s")
     return duration
+
+@app.route('/random-cat', methods=['GET'])
+@limiter.limit("100 per minute")
+def get_random_cat():
+    start_time = time.time()
+    g.start_time = start_time
+    
+    try:
+        subreddit_param = request.args.get('subreddit', '').strip().lower()
+        
+        if subreddit_param and subreddit_param in CAT_SUBREDDITS:
+            subreddit_to_use = subreddit_param
+        else:
+            available_subreddits = []
+            with prefetch_lock:
+                available_subreddits = [s for s in CAT_SUBREDDITS if s in prefetched_images and prefetched_images[s]]
+            
+            if available_subreddits:
+                tier1_available = [s for s in available_subreddits if CAT_SUBREDDITS[s] == 1]
+                if tier1_available:
+                    subreddit_to_use = random.choice(tier1_available)
+                else:
+                    subreddit_to_use = random.choice(available_subreddits)
+                
+                logger.info(f"Using prefetched images from r/{subreddit_to_use}")
+                
+                with prefetch_lock:
+                    random_post = random.choice(prefetched_images[subreddit_to_use])
+                    prefetched_images[subreddit_to_use].remove(random_post)
+                    return format_cat_response(random_post, start_time)
+            
+            tier_weights = {
+                1: 0.6,  
+                2: 0.3,  
+                3: 0.1   
+            }
+            
+            tier_to_use = random.choices(
+                population=list(tier_weights.keys()),
+                weights=list(tier_weights.values()),
+                k=1
+            )[0]
+            
+            subreddits_in_tier = [s for s, t in CAT_SUBREDDITS.items() if t == tier_to_use]
+            if not subreddits_in_tier:
+                subreddits_in_tier = list(CAT_SUBREDDITS.keys())
+            
+            subreddit_to_use = random.choice(subreddits_in_tier)
+        
+        logger.info(f"Selected subreddit: r/{subreddit_to_use}")
+        
+        with prefetch_lock:
+            if subreddit_to_use in prefetched_images and prefetched_images[subreddit_to_use]:
+                random_post = random.choice(prefetched_images[subreddit_to_use])
+                prefetched_images[subreddit_to_use].remove(random_post)
+                logger.info(f"Using prefetched image from r/{subreddit_to_use}")
+                return format_cat_response(random_post, start_time)
+            
+        image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use, limit=30)
+        
+        if not image_posts:
+            logger.warning(f"No images found in r/{subreddit_to_use}, trying another subreddit")
+            
+            alternative_subreddits = [s for s in CAT_SUBREDDITS.keys() if s != subreddit_to_use]
+            if alternative_subreddits:
+                alt_subreddit = random.choice(alternative_subreddits)
+                logger.info(f"Trying alternative subreddit: r/{alt_subreddit}")
+                image_posts = fetch_safe_cat_images_from_subreddit(alt_subreddit, limit=30)
+        
+        if not image_posts:
+            return jsonify({
+                "error": "No cat images found",
+                "status": 404
+            }), 404
+        
+        random_post = random.choice(image_posts)
+        
+        with prefetch_lock:
+            if subreddit_to_use not in prefetched_images:
+                prefetched_images[subreddit_to_use] = []
+            
+            other_posts = [p for p in image_posts if p.id != random_post.id and p not in prefetched_images[subreddit_to_use]]
+            prefetched_images[subreddit_to_use].extend(other_posts[:MIN_IMAGES_PER_SUBREDDIT])
+            
+            if other_posts:
+                logger.info(f"Added {len(other_posts[:MIN_IMAGES_PER_SUBREDDIT])} new images to prefetch cache for r/{subreddit_to_use}")
+        
+        return format_cat_response(random_post, start_time)
+    
+    except Exception as e:
+        logger.error(f"Error in get_random_cat: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e),
+            "status": 500
+        }), 500
+
+def format_cat_response(post, start_time):
+    response_time = int((time.time() - start_time) * 1000)
+    
+    response = {
+        "title": post.title,
+        "url": clean_url(post.url),
+        "subreddit": post.subreddit.display_name,
+        "upvotes": post.score,
+        "source": "reddit",
+        "response_time_ms": response_time
+    }
+    
+    return jsonify(response)
+
+@app.before_request
+def block_ssl_requests():
+    if request.path.startswith('/.well-known/acme-challenge/'):
+        return '', 404
+    
+    if request.path.startswith('/.well-known/pki-validation/'):
+        return '', 404
+    
+    if request.path.startswith('/apple-app-site-association'):
+        return '', 404
+    
+    if request.path.startswith('/.well-known/assetlinks.json'):
+        return '', 404
+
+@app.before_request
+def log_all_requests():
+    g.start_time = time.time()
+    logger.debug(f"Request: {request.method} {request.path} from {request.remote_addr}")
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Server'] = 'cat API'
+    
+    return response
+
+@app.after_request
+def apply_compression(response):
+    return compress_response(response)
+
+@app.route('/')
+@log_request()
+def health_check():
+    try:
+        redis_status = "ok" if redis_client and redis_client.ping() else "error"
+        
+        reddit_status = "ok"
+        try:
+            future = thread_pool.submit(lambda: reddit.subreddit('cats').display_name)
+            future.result(timeout=REQUEST_TIMEOUT)
+        except Exception as e:
+            reddit_status = "error"
+            logger.warning(f"Reddit API check failed: {e}")
+        
+        with prefetch_lock:
+            prefetch_count = sum(len(images) for images in prefetched_images.values())
+            prefetch_subreddits = list(prefetched_images.keys())
+        
+        thread_stats = {
+            "active": len([t for t in thread_pool._threads if t.is_alive()]),
+            "total": thread_pool._max_workers,
+            "queue_size": thread_pool._work_queue.qsize()
+        }
+        
+        system_stats = {
+            "hostname": socket.gethostname(),
+            "uptime": int(time.time() - app.start_time),
+            "memory_usage": f"{psutil.virtual_memory().percent}%",
+            "cpu_usage": f"{psutil.cpu_percent(interval=0.1)}%"
+        }
+        
+        start_time = getattr(g, 'start_time', time.time())
+        response_time = int((time.time() - start_time) * 1000)
+        
+        response = {
+            "status": "healthy" if all(s == "ok" for s in [redis_status, reddit_status]) else "degraded",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "version": "1.0.0",
+            "services": {
+                "redis": redis_status,
+                "reddit": reddit_status
+            },
+            "prefetch": {
+                "count": prefetch_count,
+                "subreddits": prefetch_subreddits
+            },
+            "threads": thread_stats,
+            "system": system_stats,
+            "response_time_ms": response_time
+        }
+        
+        status_code = 200 if response["status"] == "healthy" else 503
+        return jsonify(response), status_code
+    
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        traceback.print_exc()
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.datetime.now().isoformat()
+        }), 500
+
+@app.route('/stats')
+@log_request()
+@cache_response(ttl_seconds=60)
+def api_stats():
+    try:
+        start_time = getattr(g, 'start_time', time.time())
+        
+        thread_stats = {
+            "active": len([t for t in thread_pool._threads if t.is_alive()]),
+            "total": thread_pool._max_workers,
+            "utilization": round(len([t for t in thread_pool._threads if t.is_alive()]) / thread_pool._max_workers * 100, 1)
+        }
+        
+        with prefetch_lock:
+            prefetch_count = sum(len(images) for images in prefetched_images.values())
+            prefetch_age = int(time.time() - getattr(app, 'last_prefetch_time', app.start_time))
+            
+            popular_subreddits = sorted(
+                subreddit_access_count.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:5]
+            
+            error_subreddits = {
+                sub: count for sub, count in subreddit_error_count.items() 
+                if count > 0
+            }
+            
+            prefetch_distribution = {
+                sub: len(posts) for sub, posts in prefetched_images.items()
+                if posts
+            }
+        
+        response_time = int((time.time() - start_time) * 1000)
+        
+        response = {
+            "uptime": int(time.time() - app.start_time),
+            "requests": {
+                "total": getattr(app, 'request_count', 0),
+                "random_cat": getattr(app, 'random_cat_count', 0)
+            },
+            "performance": {
+                "threads": thread_stats
+            },
+            "cache": {
+                "enabled": redis_client is not None,
+                "prefetched_images": prefetch_count,
+                "prefetch_age_seconds": prefetch_age,
+                "prefetch_distribution": prefetch_distribution,
+                "prefetch_config": {
+                    "batch_size": PREFETCH_BATCH_SIZE,
+                    "interval": PREFETCH_INTERVAL,
+                    "min_images_per_subreddit": MIN_IMAGES_PER_SUBREDDIT
+                }
+            },
+            "subreddits": {
+                "total": len(CAT_SUBREDDITS),
+                "popular": dict(popular_subreddits),
+                "errors": error_subreddits
+            },
+            "timestamp": datetime.datetime.now().isoformat(),
+            "response_time_ms": response_time
+        }
+        
+        return jsonify(response)
+    
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        return jsonify({
+            "error": "Error generating stats",
+            "details": str(e)
+        }), 500
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({
+        "error": "Bad request",
+        "details": str(e),
+        "status": 400
+    }), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({
+        "error": "Not found",
+        "details": "The requested resource was not found",
+        "status": 404
+    }), 404
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({
+        "error": "Rate limit exceeded",
+        "details": str(e.description),
+        "retry_after": e.retry_after if hasattr(e, 'retry_after') else None,
+        "status": 429
+    }), 429
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({
+        "error": "Internal server error",
+        "details": str(e),
+        "status": 500
+    }), 500
+
+@app.before_request
+def record_request_start_time():
+    g.start_time = time.time()
+    app.request_count = getattr(app, 'request_count', 0) + 1
+    if request.path == '/random-cat':
+        app.random_cat_count = getattr(app, 'random_cat_count', 0) + 1
+
+app.start_time = time.time()
 
 def start_prefetching():
     def prefetch_worker():
@@ -455,334 +721,6 @@ def start_prefetching():
     logger.info("Prefetch worker thread started")
 
 start_prefetching()
-
-@app.before_request
-def block_ssl_requests():
-    if request.path.startswith('/.well-known/acme-challenge/'):
-        return '', 404
-    
-    if request.path.startswith('/.well-known/pki-validation/'):
-        return '', 404
-    
-    if request.path.startswith('/apple-app-site-association'):
-        return '', 404
-    
-    if request.path.startswith('/.well-known/assetlinks.json'):
-        return '', 404
-
-@app.before_request
-def log_all_requests():
-    g.start_time = time.time()
-    logger.debug(f"Request: {request.method} {request.path} from {request.remote_addr}")
-
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Server'] = 'Cat API'
-    
-    return response
-
-@app.after_request
-def apply_compression(response):
-    return compress_response(response)
-
-@app.route('/')
-@log_request()
-def health_check():
-    try:
-        redis_status = "ok" if redis_client and redis_client.ping() else "error"
-        
-        reddit_status = "ok"
-        try:
-            future = thread_pool.submit(lambda: reddit.subreddit('cats').display_name)
-            future.result(timeout=REQUEST_TIMEOUT)
-        except Exception as e:
-            reddit_status = "error"
-            logger.warning(f"Reddit API check failed: {e}")
-        
-        with prefetch_lock:
-            prefetch_count = sum(len(posts) for posts in prefetched_images.values())
-            prefetch_subreddits = list(prefetched_images.keys())
-        
-        thread_stats = {
-            "active": len([t for t in thread_pool._threads if t.is_alive()]),
-            "total": thread_pool._max_workers,
-            "queue_size": thread_pool._work_queue.qsize()
-        }
-        
-        system_stats = {
-            "hostname": socket.gethostname(),
-            "uptime": int(time.time() - app.start_time),
-            "memory_usage": f"{psutil.virtual_memory().percent}%",
-            "cpu_usage": f"{psutil.cpu_percent(interval=0.1)}%"
-        }
-        
-        start_time = getattr(g, 'start_time', time.time())
-        response_time = int((time.time() - start_time) * 1000)
-        
-        response = {
-            "status": "healthy" if all(s == "ok" for s in [redis_status, reddit_status]) else "degraded",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "version": "1.0.0",
-            "services": {
-                "redis": redis_status,
-                "reddit": reddit_status
-            },
-            "prefetch": {
-                "count": prefetch_count,
-                "subreddits": prefetch_subreddits
-            },
-            "threads": thread_stats,
-            "system": system_stats,
-            "response_time_ms": response_time
-        }
-        
-        status_code = 200 if response["status"] == "healthy" else 503
-        return jsonify(response), status_code
-    
-    except Exception as e:
-        logger.error(f"Health check error: {e}")
-        traceback.print_exc()
-        return jsonify({
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.datetime.now().isoformat()
-        }), 500
-
-@app.route('/stats')
-@log_request()
-@cache_response(ttl_seconds=60)
-def api_stats():
-    try:
-        start_time = getattr(g, 'start_time', time.time())
-        
-        thread_stats = {
-            "active": len([t for t in thread_pool._threads if t.is_alive()]),
-            "total": thread_pool._max_workers,
-            "utilization": round(len([t for t in thread_pool._threads if t.is_alive()]) / thread_pool._max_workers * 100, 1)
-        }
-        
-        with prefetch_lock:
-            prefetch_count = sum(len(posts) for posts in prefetched_images.values())
-            prefetch_age = int(time.time() - getattr(app, 'last_prefetch_time', app.start_time))
-            
-            popular_subreddits = sorted(
-                subreddit_access_count.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:5]
-            
-            error_subreddits = {
-                sub: count for sub, count in subreddit_error_count.items() 
-                if count > 0
-            }
-            
-            prefetch_distribution = {
-                sub: len(posts) for sub, posts in prefetched_images.items()
-                if posts
-            }
-        
-        response_time = int((time.time() - start_time) * 1000)
-        
-        response = {
-            "uptime": int(time.time() - app.start_time),
-            "requests": {
-                "total": getattr(app, 'request_count', 0),
-                "random_cat": getattr(app, 'random_cat_count', 0)
-            },
-            "performance": {
-                "threads": thread_stats
-            },
-            "cache": {
-                "enabled": redis_client is not None,
-                "prefetched_images": prefetch_count,
-                "prefetch_age_seconds": prefetch_age,
-                "prefetch_distribution": prefetch_distribution,
-                "prefetch_config": {
-                    "batch_size": PREFETCH_BATCH_SIZE,
-                    "interval": PREFETCH_INTERVAL,
-                    "min_images_per_subreddit": MIN_IMAGES_PER_SUBREDDIT
-                }
-            },
-            "subreddits": {
-                "total": len(cat_subreddits),
-                "popular": dict(popular_subreddits),
-                "errors": error_subreddits
-            },
-            "timestamp": datetime.datetime.now().isoformat(),
-            "response_time_ms": response_time
-        }
-        
-        return jsonify(response)
-    
-    except Exception as e:
-        logger.error(f"Stats error: {e}")
-        return jsonify({
-            "error": "Error generating stats",
-            "details": str(e)
-        }), 500
-
-@app.route('/random-cat')
-@log_request()
-@validate_request(CatRequestSchema)
-@cache_response()
-def get_random_cat():
-    try:
-        start_time = getattr(g, 'start_time', time.time())
-        
-        validated_data = getattr(g, 'validated_data', {})
-        
-        requested_subreddit = validated_data.get('subreddit')
-        
-        if requested_subreddit and requested_subreddit not in cat_subreddits:
-            return jsonify({
-                "error": f"Invalid subreddit. Must be one of: {', '.join(cat_subreddits)}",
-                "status": 400
-            }), 400
-        
-        subreddit_to_use = requested_subreddit if requested_subreddit else random.choice(cat_subreddits)
-        
-        subreddit_access_count[subreddit_to_use] = subreddit_access_count.get(subreddit_to_use, 0) + 1
-        last_access_time[subreddit_to_use] = time.time()
-        
-        origin = request.headers.get('Origin')
-        is_allowed_origin = origin and allowed_origins and origin in origins
-        
-        image_posts = []
-        with prefetch_lock:
-            if subreddit_to_use in prefetched_images and prefetched_images[subreddit_to_use]:
-                image_posts = prefetched_images[subreddit_to_use]
-                
-                if image_posts and (requested_subreddit or is_allowed_origin):
-                    random_post = random.choice(image_posts)
-                    prefetched_images[subreddit_to_use].remove(random_post)
-                    
-                    if len(prefetched_images[subreddit_to_use]) < MIN_IMAGES_PER_SUBREDDIT:
-                        logger.info(f"Running low on prefetched images for r/{subreddit_to_use}: {len(prefetched_images[subreddit_to_use])} remaining")
-                    
-                    return format_cat_response(random_post, start_time)
-        
-        if not image_posts:
-            logger.info(f"No prefetched images for {subreddit_to_use}, fetching directly")
-            image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use)
-        
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            if not image_posts:
-                logger.warning(f"No images found in r/{subreddit_to_use}, trying another subreddit (attempt {attempt+1}/{max_attempts})")
-                
-                if not requested_subreddit:
-                    with prefetch_lock:
-                        available_subs = [s for s in prefetched_images.keys() 
-                                         if prefetched_images[s] and s != subreddit_to_use]
-                    
-                    if available_subs:
-                        subreddit_to_use = random.choice(available_subs)
-                        logger.info(f"Selected alternative subreddit with prefetched images: r/{subreddit_to_use}")
-                    else:
-                        subreddit_to_use = random.choice([s for s in cat_subreddits if s != subreddit_to_use])
-                    
-                    subreddit_access_count[subreddit_to_use] = subreddit_access_count.get(subreddit_to_use, 0) + 1
-                    last_access_time[subreddit_to_use] = time.time()
-                    
-                    image_posts = fetch_safe_cat_images_from_subreddit(subreddit_to_use)
-                else:
-                    break
-            else:
-                break
-        
-        if not image_posts:
-            return jsonify({
-                "error": "No safe cat images found after multiple attempts",
-                "status": 404
-            }), 404
-        
-        random_post = random.choice(image_posts)
-        
-        if subreddit_to_use not in prefetched_images:
-            with prefetch_lock:
-                prefetched_images[subreddit_to_use] = []
-                
-                other_posts = [p for p in image_posts if p.id != random_post.id]
-                prefetched_images[subreddit_to_use].extend(other_posts[:MIN_IMAGES_PER_SUBREDDIT])
-                
-                if other_posts:
-                    logger.info(f"Added {len(other_posts[:MIN_IMAGES_PER_SUBREDDIT])} directly fetched images to prefetch cache for r/{subreddit_to_use}")
-        
-        elif is_allowed_origin and random_post in prefetched_images[subreddit_to_use]:
-            with prefetch_lock:
-                if random_post in prefetched_images[subreddit_to_use]:
-                    prefetched_images[subreddit_to_use].remove(random_post)
-        
-        return format_cat_response(random_post, start_time)
-    
-    except Exception as e:
-        logger.error(f"Error in get_random_cat: {e}")
-        traceback.print_exc()
-        return jsonify({
-            "error": "Internal server error",
-            "details": str(e),
-            "status": 500
-        }), 500
-
-def format_cat_response(post, start_time):
-    response_time = int((time.time() - start_time) * 1000)
-    
-    response = {
-        "title": post.title,
-        "url": post.url,
-        "subreddit": post.subreddit.display_name,
-        "upvotes": post.score,
-        "source": "reddit",
-        "response_time_ms": response_time
-    }
-    
-    return jsonify(response)
-
-@app.errorhandler(400)
-def bad_request(e):
-    return jsonify({
-        "error": "Bad request",
-        "details": str(e),
-        "status": 400
-    }), 400
-
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({
-        "error": "Not found",
-        "details": "The requested resource was not found",
-        "status": 404
-    }), 404
-
-@app.errorhandler(429)
-def ratelimit_handler(e):
-    return jsonify({
-        "error": "Rate limit exceeded",
-        "details": str(e.description),
-        "retry_after": e.retry_after if hasattr(e, 'retry_after') else None,
-        "status": 429
-    }), 429
-
-@app.errorhandler(500)
-def server_error(e):
-    return jsonify({
-        "error": "Internal server error",
-        "details": str(e),
-        "status": 500
-    }), 500
-
-@app.before_request
-def record_request_start_time():
-    g.start_time = time.time()
-    app.request_count = getattr(app, 'request_count', 0) + 1
-    if request.path == '/random-cat':
-        app.random_cat_count = getattr(app, 'random_cat_count', 0) + 1
-
-app.start_time = time.time()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=False, threaded=True)
