@@ -116,12 +116,12 @@ session.mount("https://", adapter)
 
 CAT_SUBREDDITS = {
     'cats': 1, 'catpictures': 1, 'kittens': 1, 'IllegallySmolCats': 1, 'cat': 1, 'SupermodelCats': 1, 
-    'BlackCats': 1, 'CatsWithJobs': 1, 'CatGifs': 1, 'StartledCats': 1, 'CatsInBoxes': 1, 'Eyebleach': 1,
+    'BlackCats': 1, 'CatsWithJobs': 1, 'CatGifs': 1, 'StartledCats': 1, 'CatsInBoxes': 1,
     
     'Catloaf': 2, 'CatsStandingUp': 2, 'CatsInSinks': 2, 'TuxedoCats': 2, 'CatSpotting': 2, 'CatBellies': 2,
     'TheCatTrapIsWorking': 2, 'curledfeetsies': 2, 'CatsAreAssholes': 2, 'CatsInHats': 2, 'CatsOnGlass': 2, 
     'blep': 2, 'CatSlaps': 2, 'CatsWhoYell': 2, 'teefies': 2, 'toebeans': 2, 'gingercats': 2, 'mainecoons': 2,
-    'standardissuecat': 2, 'ChonkyCats': 2, 'Kitten': 2, 'KittenGifs': 2, 'CatPics': 2, 'PetTheDamnCat': 2,
+    'standardissuecat': 2, 'Kitten': 2, 'KittenGifs': 2, 'CatPics': 2, 'PetTheDamnCat': 2,
     
     '316cats': 3, 'Floof': 3, 'CatsInBusinessAttire': 3, 'CatsAreAliens': 3, 'CatLoaf': 3, 'CatsWithcats': 3,
     'CatsPlayingDnd': 3, 'CatsWithSocks': 3, 'airplaneears': 3, 'bottlebrush': 3, 'CatsInWaterPackages': 3, 
